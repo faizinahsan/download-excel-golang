@@ -65,3 +65,6 @@ help:
 	@echo "  help        - Show this help message"
 	@echo ""
 	@echo "Note: Make sure goose is installed: go install github.com/pressly/goose/v3/cmd/goose@latest"
+
+goose-create:
+	goose -dir migrations create ${file} sql
