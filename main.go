@@ -98,7 +98,6 @@ func (h *Handler) GetTransactions(c *fiber.Ctx) error {
 	runtime.ReadMemStats(&mEnd)
 	elapsed := time.Since(start)
 	log.Infof("Memory Usage: Alloc = %.2f MB, TotalAlloc = %.2f MB, Sys = %.2f MB, NumGC = %v", float64(mEnd.Alloc-mStart.Alloc)/1024/1024, float64(mEnd.TotalAlloc-mStart.TotalAlloc)/1024/1024, float64(mEnd.Sys-mStart.Sys)/1024/1024, mEnd.NumGC-mStart.NumGC)
-	log.Infof("Execution Time: %v", elapsed)
 	defer func() {
 		err = os.Remove("./" + filename)
 		if err != nil {
@@ -106,6 +105,7 @@ func (h *Handler) GetTransactions(c *fiber.Ctx) error {
 		} else {
 			log.Infof("Successfully removed file %s", filename)
 		}
+		log.Infof("Execution Time: %v", elapsed)
 	}()
 	return c.Download("./" + filename)
 }
