@@ -8,8 +8,8 @@ services:
     environment:
       - DB_HOST=postgres
       - DB_PORT=5432
-      - DB_USER=postgres
-      - DB_PASSWORD=password
+      - DB_USER=user
+      - DB_PASSWORD=myAwEsOm3pa55@w0rd
       - DB_NAME=excel_db
     depends_on:
       - postgres
@@ -19,8 +19,8 @@ services:
   postgres:
     image: postgres:15-alpine
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=myAwEsOm3pa55@w0rd
       - POSTGRES_DB=excel_db
     ports:
       - "5432:5432"

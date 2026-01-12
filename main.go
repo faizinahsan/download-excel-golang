@@ -2,6 +2,7 @@ package main
 
 import (
 	"download-excel-project/config"
+	"download-excel-project/export"
 	"download-excel-project/repository"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/log"
@@ -26,7 +27,7 @@ func main() {
 		log.Fatalf("Fatal error config file: %s \n", err)
 	}
 	app := fiber.New(fiber.Config{
-		Prefork:       true,
+		Prefork:       false, // Disabled for compatibility
 		CaseSensitive: true,
 		StrictRouting: true,
 		ServerHeader:  "Fiber",
@@ -43,9 +44,16 @@ func main() {
 	transaction := app.Group("/transactions")
 	transaction.Get("/", handler.GetTransactions)
 
-	err = app.Listen(":" + viper.GetString("server.port"))
+	port := viper.GetString("server.port")
+	if port == "" {
+		log.Fatalf("Fatal error: server.port is not set in config file")
+	}
+	log.Infof("Attempting to start server on port: %s", port)
+
+	err = app.Listen(":" + port)
 	if err != nil {
-		log.Errorf("Failed to start server: %v", err)
+		log.Errorf("Failed to start server on port %s: %T: %v | %s", port, err, err, err.Error())
+		os.Exit(1)
 	}
 }
 
@@ -71,7 +79,7 @@ func (h *Handler) GetTransactions(c *fiber.Ctx) error {
 		})
 	}
 	log.Infof("Retrieved %d transactions", len(transactions))
-	filename, err := ExportExcel(transactions)
+	filename, err := export.ExportExcel(transactions)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
