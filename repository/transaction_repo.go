@@ -7,7 +7,7 @@ import (
 
 type TransactionRepo interface {
 	GetTransactions() ([]domain.Transaction, error)
-	GetTransactionToArray() ([][]interface{}, error)
+	GetTransactionToArray(totalData int32) ([][]interface{}, error)
 }
 
 type TransactionRepoImpl struct {
@@ -38,8 +38,8 @@ func (t TransactionRepoImpl) GetTransactions() ([]domain.Transaction, error) {
 	return transactions, nil
 }
 
-func (t TransactionRepoImpl) GetTransactionToArray() ([][]interface{}, error) {
-	rows, err := t.db.Query("SELECT id, transaction_amount, transaction_date, feature_name, reference_number FROM transactions order by id, transaction_date DESC")
+func (t TransactionRepoImpl) GetTransactionToArray(totalData int32) ([][]interface{}, error) {
+	rows, err := t.db.Query("SELECT id, transaction_amount, transaction_date, feature_name, reference_number FROM transactions order by id, transaction_date DESC LIMIT $1", totalData)
 	if err != nil {
 		return nil, err
 	}

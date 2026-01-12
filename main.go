@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/viper"
 	"os"
 	"runtime"
+	"strconv"
 	"time"
 )
 
@@ -42,7 +43,7 @@ func main() {
 
 	app.Get("/hello", handler.HelloWorld)
 	transaction := app.Group("/transactions")
-	transaction.Get("/", handler.GetTransactions)
+	transaction.Get("/download", handler.GetTransactions)
 
 	port := viper.GetString("server.port")
 	if port == "" {
@@ -71,8 +72,16 @@ func (h *Handler) GetTransactions(c *fiber.Ctx) error {
 	start := time.Now()
 	var mStart, mEnd runtime.MemStats
 	runtime.ReadMemStats(&mStart)
+	log.Info("Received request to download transactions")
 
-	transactions, err := h.transactionRepo.GetTransactionToArray()
+	totalData := 0
+	if totalDataReq := c.Query("total_data"); totalDataReq != "" {
+		log.Infof("Query parameter total_data: %s", totalDataReq)
+		totalData, _ = strconv.Atoi(totalDataReq)
+	} else {
+		return c.SendStatus(fiber.StatusBadRequest)
+	}
+	transactions, err := h.transactionRepo.GetTransactionToArray(int32(totalData))
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
