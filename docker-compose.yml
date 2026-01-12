@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   download-excel-app:
-    build: .
+    image: faizinahsan/download-excel-app:latest
     ports:
       - "3000:3000"
     environment:
