@@ -74,6 +74,9 @@ func (h *Handler) GetTransactions(c *fiber.Ctx) error {
 	var mStart, mEnd runtime.MemStats
 	runtime.ReadMemStats(&mStart)
 	log.Info("Received request to generate transactions")
+	go func() {
+
+	}()
 
 	totalData := 0
 	if totalDataReq := c.Query("total_data"); totalDataReq != "" {
@@ -95,6 +98,14 @@ func (h *Handler) GetTransactions(c *fiber.Ctx) error {
 			"error": err.Error(),
 		})
 	}
+	zipFile := filename + ".zip"
+	err = export.AddToZip(filename, zipFile)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+	log.Infof("Generated file: %s", zipFile)
 
 	runtime.ReadMemStats(&mEnd)
 	elapsed := time.Since(start)
@@ -103,7 +114,8 @@ func (h *Handler) GetTransactions(c *fiber.Ctx) error {
 		log.Infof("Execution Time: %v", elapsed)
 	}()
 	return c.Status(200).JSON(fiber.Map{
-		"message": "File generated successfully: " + filename,
+		"message": "File generated successfully",
+		"file":    zipFile,
 	})
 }
 
