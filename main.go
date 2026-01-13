@@ -165,50 +165,50 @@ func (h *Handler) GenerateAuditTrailData(c *fiber.Ctx) error {
 	//} else {
 	//	return c.SendStatus(fiber.StatusBadRequest)
 	//}
+	filename := "AuditTrailProfile1.xlsx"
+	zipFile := filename + ".zip"
 	// Method 1: Batch Processing - Sangat direkomendasikan untuk 1 juta data
 
-	var allData [][]interface{}
-	var totalData int32 = 1000000
-	var batchSize int32 = 50000 // Process 50k records per batch
-	var offset int32 = 0
+	go func() {
+		var allData [][]interface{}
+		var totalData int32 = 1000000
+		var batchSize int32 = 50000 // Process 50k records per batch
+		var offset int32 = 0
 
-	for offset < totalData {
-		currentBatch := batchSize
-		if offset+batchSize > totalData {
-			currentBatch = totalData - offset
+		for offset < totalData {
+			currentBatch := batchSize
+			if offset+batchSize > totalData {
+				currentBatch = totalData - offset
+			}
+
+			log.Infof("Processing batch: offset=%d, size=%d\n", offset, currentBatch)
+
+			batch, err := h.customerRepo.GenerateUpdateDataOptimized(currentBatch, offset)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			allData = append(allData, batch...)
+			offset += batchSize
 		}
-
-		log.Infof("Processing batch: offset=%d, size=%d\n", offset, currentBatch)
-
-		batch, err := h.customerRepo.GenerateUpdateDataOptimized(currentBatch, offset)
+		filename, err := export.ExportAuditTrailToExcelV2(allData)
 		if err != nil {
-			log.Fatal(err)
+			log.Errorf("Error exporting audit trail to Excel: %v", err)
+			return
 		}
+		err = export.AddToZip(filename, zipFile)
+		if err != nil {
+			log.Errorf("Error creating zip file: %v", err)
+			return
+		}
+		log.Infof("Generated file: %s", zipFile)
 
-		allData = append(allData, batch...)
-		offset += batchSize
-	}
-	filename, err := export.ExportAuditTrailToExcelV2(allData)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	zipFile := filename + ".zip"
-	err = export.AddToZip(filename, zipFile)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-	log.Infof("Generated file: %s", zipFile)
-
-	runtime.ReadMemStats(&mEnd)
-	elapsed := time.Since(start)
-	log.Infof("Memory Usage: Alloc = %.2f MB, TotalAlloc = %.2f MB, Sys = %.2f MB, NumGC = %v", float64(mEnd.Alloc-mStart.Alloc)/1024/1024, float64(mEnd.TotalAlloc-mStart.TotalAlloc)/1024/1024, float64(mEnd.Sys-mStart.Sys)/1024/1024, mEnd.NumGC-mStart.NumGC)
-	defer func() {
-		log.Infof("Execution Time: %v", elapsed)
+		runtime.ReadMemStats(&mEnd)
+		elapsed := time.Since(start)
+		log.Infof("Memory Usage: Alloc = %.2f MB, TotalAlloc = %.2f MB, Sys = %.2f MB, NumGC = %v", float64(mEnd.Alloc-mStart.Alloc)/1024/1024, float64(mEnd.TotalAlloc-mStart.TotalAlloc)/1024/1024, float64(mEnd.Sys-mStart.Sys)/1024/1024, mEnd.NumGC-mStart.NumGC)
+		defer func() {
+			log.Infof("Execution Time: %v", elapsed)
+		}()
 	}()
 	return c.Status(200).JSON(fiber.Map{
 		"message": "Customer update data file generated successfully",

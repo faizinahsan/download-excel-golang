@@ -65,7 +65,7 @@ func ExportExcel(rowData [][]interface{}) (filename string, err error) {
 	return fileName, nil
 }
 
-func GenerateCustomerUpdateDataExcel(rowData [][]interface{}) (filename string, err error) {
+func GenerateCustomerUpdateDataExcel(rowData [][]interface{}, fileName string) (filename string, err error) {
 	f := excelize.NewFile()
 	defer func() {
 		if err := f.Close(); err != nil {
@@ -113,7 +113,6 @@ func GenerateCustomerUpdateDataExcel(rowData [][]interface{}) (filename string, 
 		log.Errorf(err.Error())
 		return "", err
 	}
-	fileName := "AuditTrailProfile1.xlsx"
 	if err := f.SaveAs(fileName); err != nil {
 		log.Errorf(err.Error())
 		return "", err
