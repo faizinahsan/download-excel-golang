@@ -50,7 +50,8 @@ func main() {
 	transaction.Get("/download", handler.DownloadTransactionFile)
 
 	customer := app.Group("/customers")
-	customer.Get("/generate-update-data", handler.GenerateCustomerUpdateData)
+	customer.Get("/generate-update-data", handler.GenerateAuditTrailData)
+	customer.Get("/download-update-data", handler.DownloadAuditTrailFile)
 
 	port := viper.GetString("server.port")
 	if port == "" {
@@ -150,7 +151,7 @@ func (h *Handler) DownloadTransactionFile(c *fiber.Ctx) error {
 	return c.Download("./" + filename)
 }
 
-func (h *Handler) GenerateCustomerUpdateData(c *fiber.Ctx) error {
+func (h *Handler) GenerateAuditTrailData(c *fiber.Ctx) error {
 	start := time.Now()
 	var mStart, mEnd runtime.MemStats
 	runtime.ReadMemStats(&mStart)
@@ -166,36 +167,42 @@ func (h *Handler) GenerateCustomerUpdateData(c *fiber.Ctx) error {
 	//}
 	// Method 1: Batch Processing - Sangat direkomendasikan untuk 1 juta data
 
-	// Method 2: Streaming dengan Channel - Paling memory efficient
-	fmt.Println("\n=== Method 2: Streaming dengan Channel ===")
-	start = time.Now()
+	var allData [][]interface{}
 	var totalData int32 = 1000000
-	dataChan, errChan := h.customerRepo.GenerateUpdateDataWithCursor(totalData)
-	var count int
+	var batchSize int32 = 50000 // Process 50k records per batch
+	var offset int32 = 0
 
-	go func() {
-		for row := range dataChan {
-			count++
-			// Process each row here
-			_ = row // Placeholder untuk processing
-
-			if count%10000 == 0 {
-				fmt.Printf("Processed %d records so far...\n", count)
-			}
+	for offset < totalData {
+		currentBatch := batchSize
+		if offset+batchSize > totalData {
+			currentBatch = totalData - offset
 		}
-	}()
 
-	// Check for errors
-	select {
-	case err := <-errChan:
+		log.Infof("Processing batch: offset=%d, size=%d\n", offset, currentBatch)
+
+		batch, err := h.customerRepo.GenerateUpdateDataOptimized(currentBatch, offset)
 		if err != nil {
 			log.Fatal(err)
 		}
-	case <-time.After(10 * time.Minute): // Timeout after 10 minutes
-		fmt.Println("Processing completed or timed out")
+
+		allData = append(allData, batch...)
+		offset += batchSize
+	}
+	filename, err := export.ExportAuditTrailToExcelV2(allData)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
 	}
 
-	filename := "customer_update_data.xlsx"
+	zipFile := filename + ".zip"
+	err = export.AddToZip(filename, zipFile)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+	log.Infof("Generated file: %s", zipFile)
 
 	runtime.ReadMemStats(&mEnd)
 	elapsed := time.Since(start)
@@ -205,7 +212,27 @@ func (h *Handler) GenerateCustomerUpdateData(c *fiber.Ctx) error {
 	}()
 	return c.Status(200).JSON(fiber.Map{
 		"message": "Customer update data file generated successfully",
-		"file":    filename,
-		"lenData": count,
+		"file":    zipFile,
 	})
+}
+
+func (h *Handler) DownloadAuditTrailFile(c *fiber.Ctx) error {
+	start := time.Now()
+	var mStart, mEnd runtime.MemStats
+	runtime.ReadMemStats(&mStart)
+	log.Info("Received request to download transactions")
+	filename := c.Query("filename")
+	defer func() {
+		runtime.ReadMemStats(&mEnd)
+		elapsed := time.Since(start)
+		log.Infof("Memory Usage: Alloc = %.2f MB, TotalAlloc = %.2f MB, Sys = %.2f MB, NumGC = %v", float64(mEnd.Alloc-mStart.Alloc)/1024/1024, float64(mEnd.TotalAlloc-mStart.TotalAlloc)/1024/1024, float64(mEnd.Sys-mStart.Sys)/1024/1024, mEnd.NumGC-mStart.NumGC)
+		err := os.Remove("./" + filename)
+		if err != nil {
+			log.Errorf("Failed to remove file %s: %v", filename, err)
+		} else {
+			log.Infof("Successfully removed file %s", filename)
+		}
+		log.Infof("Execution Time: %v", elapsed)
+	}()
+	return c.Download("./" + filename)
 }
