@@ -4,6 +4,7 @@ import (
 	"download-excel-project/config"
 	"download-excel-project/export"
 	"download-excel-project/repository"
+	"fmt"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/log"
 	_ "github.com/lib/pq"
@@ -16,6 +17,7 @@ import (
 
 type Handler struct {
 	transactionRepo repository.TransactionRepo
+	customerRepo    repository.CustomerRepo
 }
 
 func main() {
@@ -39,12 +41,16 @@ func main() {
 		panic(err)
 	}
 	transactionRepo := repository.NewTransactionRepo(db)
-	handler := NewServiceHandler(transactionRepo)
+	customerRepo := repository.NewCustomerRepo(db)
+	handler := NewServiceHandler(transactionRepo, customerRepo)
 
 	app.Get("/hello", handler.HelloWorld)
 	transaction := app.Group("/transactions")
 	transaction.Get("/generate-file", handler.GetTransactions)
 	transaction.Get("/download", handler.DownloadTransactionFile)
+
+	customer := app.Group("/customers")
+	customer.Get("/generate-update-data", handler.GenerateCustomerUpdateData)
 
 	port := viper.GetString("server.port")
 	if port == "" {
@@ -59,9 +65,13 @@ func main() {
 	}
 }
 
-func NewServiceHandler(transactionRepo repository.TransactionRepo) *Handler {
+func NewServiceHandler(
+	transactionRepo repository.TransactionRepo,
+	customerRepo repository.CustomerRepo,
+) *Handler {
 	return &Handler{
 		transactionRepo: transactionRepo,
+		customerRepo:    customerRepo,
 	}
 }
 
@@ -138,4 +148,64 @@ func (h *Handler) DownloadTransactionFile(c *fiber.Ctx) error {
 		log.Infof("Execution Time: %v", elapsed)
 	}()
 	return c.Download("./" + filename)
+}
+
+func (h *Handler) GenerateCustomerUpdateData(c *fiber.Ctx) error {
+	start := time.Now()
+	var mStart, mEnd runtime.MemStats
+	runtime.ReadMemStats(&mStart)
+	log.Info("Received request to generate customer update data")
+	fmt.Println("=== Method 1: Batch Processing ===")
+
+	//totalData := 0
+	//if totalDataReq := c.Query("total_data"); totalDataReq != "" {
+	//	log.Infof("Query parameter total_data: %s", totalDataReq)
+	//	totalData, _ = strconv.Atoi(totalDataReq)
+	//} else {
+	//	return c.SendStatus(fiber.StatusBadRequest)
+	//}
+	// Method 1: Batch Processing - Sangat direkomendasikan untuk 1 juta data
+
+	// Method 2: Streaming dengan Channel - Paling memory efficient
+	fmt.Println("\n=== Method 2: Streaming dengan Channel ===")
+	start = time.Now()
+	var totalData int32 = 1000000
+	dataChan, errChan := h.customerRepo.GenerateUpdateDataWithCursor(totalData)
+	var count int
+
+	go func() {
+		for row := range dataChan {
+			count++
+			// Process each row here
+			_ = row // Placeholder untuk processing
+
+			if count%10000 == 0 {
+				fmt.Printf("Processed %d records so far...\n", count)
+			}
+		}
+	}()
+
+	// Check for errors
+	select {
+	case err := <-errChan:
+		if err != nil {
+			log.Fatal(err)
+		}
+	case <-time.After(10 * time.Minute): // Timeout after 10 minutes
+		fmt.Println("Processing completed or timed out")
+	}
+
+	filename := "customer_update_data.xlsx"
+
+	runtime.ReadMemStats(&mEnd)
+	elapsed := time.Since(start)
+	log.Infof("Memory Usage: Alloc = %.2f MB, TotalAlloc = %.2f MB, Sys = %.2f MB, NumGC = %v", float64(mEnd.Alloc-mStart.Alloc)/1024/1024, float64(mEnd.TotalAlloc-mStart.TotalAlloc)/1024/1024, float64(mEnd.Sys-mStart.Sys)/1024/1024, mEnd.NumGC-mStart.NumGC)
+	defer func() {
+		log.Infof("Execution Time: %v", elapsed)
+	}()
+	return c.Status(200).JSON(fiber.Map{
+		"message": "Customer update data file generated successfully",
+		"file":    filename,
+		"lenData": count,
+	})
 }
