@@ -176,7 +176,7 @@ func (h *Handler) GenerateAuditTrailData(c *fiber.Ctx) error {
 
 	go func() {
 		var allData [][]interface{}
-		var batchSize int32 = 5000 // Process 50k records per batch
+		var batchSize int32 = 50000 // Process 50k records per batch
 		var offset int32 = 0
 
 		for offset < totalData {
