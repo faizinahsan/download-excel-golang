@@ -168,10 +168,14 @@ func (h *Handler) GenerateAuditTrailData(c *fiber.Ctx) error {
 	filename := "AuditTrailProfile1.xlsx"
 	zipFile := filename + ".zip"
 	// Method 1: Batch Processing - Sangat direkomendasikan untuk 1 juta data
+	totalDataReq, err := strconv.Atoi(c.Query("total_data"))
+	if err != nil {
+		return c.SendStatus(fiber.StatusBadRequest)
+	}
+	totalData := int32(totalDataReq)
 
 	go func() {
 		var allData [][]interface{}
-		var totalData int32 = 10000
 		var batchSize int32 = 5000 // Process 50k records per batch
 		var offset int32 = 0
 
