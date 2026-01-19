@@ -77,6 +77,7 @@ func NewServiceHandler(
 }
 
 func (h *Handler) HelloWorld(c *fiber.Ctx) error {
+	log.Info("Request received for HelloWorld endpoint")
 	return c.SendString("Hello, World!")
 }
 
