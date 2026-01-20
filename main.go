@@ -58,6 +58,11 @@ func main() {
 	customer.Get("/export/excel/streaming", handler.ExportCustomerExcelStreamingQuery)
 	customer.Get("/download/:filename", handler.DownloadCustomerExcelFile)
 
+	// Background export endpoints
+	customer.Post("/export/background", handler.StartBackgroundExport)
+	customer.Get("/export/status/:jobId", handler.GetExportStatus)
+	customer.Get("/export/download/:jobId", handler.DownloadBackgroundExport)
+
 	port := viper.GetString("server.port")
 	if port == "" {
 		log.Fatalf("Fatal error: server.port is not set in config file")
@@ -414,4 +419,83 @@ func (h *Handler) DownloadCustomerExcelFile(c *fiber.Ctx) error {
 	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
 
 	return c.SendFile("./" + filename)
+}
+
+// StartBackgroundExport - Start background Excel export
+func (h *Handler) StartBackgroundExport(c *fiber.Ctx) error {
+	var req struct {
+		TotalData int32 `json:"total_data"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		log.Errorf("Failed to parse request body: %v", err)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request format",
+		})
+	}
+
+	if req.TotalData <= 0 || req.TotalData > 5000000 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "total_data must be between 1 and 5,000,000",
+		})
+	}
+
+	jobID := fmt.Sprintf("%d", time.Now().UnixNano())
+	export.StartBackgroundExport(jobID, req.TotalData, h.customerRepo)
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"job_id":  jobID,
+		"message": "Export started in background",
+	})
+}
+
+// GetExportStatus - Get background export status
+func (h *Handler) GetExportStatus(c *fiber.Ctx) error {
+	jobID := c.Params("jobId")
+	if jobID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "job_id is required",
+		})
+	}
+
+	status, exists := export.GetJobStatus(jobID)
+	if !exists {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Job not found",
+		})
+	}
+
+	return c.JSON(status)
+}
+
+// DownloadBackgroundExport - Download completed background export
+func (h *Handler) DownloadBackgroundExport(c *fiber.Ctx) error {
+	jobID := c.Params("jobId")
+	if jobID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "job_id is required",
+		})
+	}
+
+	status, exists := export.GetJobStatus(jobID)
+	if !exists {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Job not found",
+		})
+	}
+
+	if status.Status != "completed" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fmt.Sprintf("Export not ready. Status: %s", status.Status),
+		})
+	}
+
+	c.Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", status.Filename))
+
+	// Cleanup after download
+	defer export.CleanupJob(jobID)
+
+	return c.SendFile("./" + status.Filename)
 }
