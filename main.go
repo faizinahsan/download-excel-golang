@@ -53,6 +53,11 @@ func main() {
 	customer.Get("/generate-update-data", handler.GenerateAuditTrailData)
 	customer.Get("/download-update-data", handler.DownloadAuditTrailFile)
 
+	// New streaming Excel export endpoints
+	customer.Post("/export/excel/streaming", handler.ExportCustomerExcelStreaming)
+	customer.Get("/export/excel/streaming", handler.ExportCustomerExcelStreamingQuery)
+	customer.Get("/download/:filename", handler.DownloadCustomerExcelFile)
+
 	port := viper.GetString("server.port")
 	if port == "" {
 		log.Fatalf("Fatal error: server.port is not set in config file")
@@ -240,4 +245,173 @@ func (h *Handler) DownloadAuditTrailFile(c *fiber.Ctx) error {
 		log.Infof("Execution Time: %v", elapsed)
 	}()
 	return c.Download("./" + filename)
+}
+
+// ExportCustomerExcelStreaming - Streaming Excel export dengan POST request body
+func (h *Handler) ExportCustomerExcelStreaming(c *fiber.Ctx) error {
+	start := time.Now()
+	var mStart, mEnd runtime.MemStats
+	runtime.ReadMemStats(&mStart)
+	log.Info("Received request for streaming Excel export (POST)")
+
+	// Parse request body
+	var req struct {
+		TotalData int32  `json:"total_data"`
+		Filename  string `json:"filename"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request format",
+		})
+	}
+
+	// Validate request
+	if req.TotalData <= 0 || req.TotalData > 5000000 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "total_data must be between 1 and 5,000,000",
+		})
+	}
+
+	// Generate filename if not provided
+	filename := req.Filename
+	if filename == "" {
+		filename = fmt.Sprintf("customer_updates_streaming_%s.xlsx", time.Now().Format("20060102_150405"))
+	}
+
+	// Ensure .xlsx extension
+	if len(filename) < 5 || filename[len(filename)-5:] != ".xlsx" {
+		filename += ".xlsx"
+	}
+
+	// Start streaming export
+	resultFilename, err := export.ExportCustomerToExcelWithStreaming(h.customerRepo, req.TotalData, filename)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": fmt.Sprintf("Failed to generate Excel file: %v", err),
+		})
+	}
+
+	runtime.ReadMemStats(&mEnd)
+	elapsed := time.Since(start)
+	log.Infof("Memory Usage: Alloc = %.2f MB, TotalAlloc = %.2f MB, Sys = %.2f MB, NumGC = %v",
+		float64(mEnd.Alloc-mStart.Alloc)/1024/1024,
+		float64(mEnd.TotalAlloc-mStart.TotalAlloc)/1024/1024,
+		float64(mEnd.Sys-mStart.Sys)/1024/1024,
+		mEnd.NumGC-mStart.NumGC)
+	log.Infof("Execution Time: %v", elapsed)
+
+	return c.JSON(fiber.Map{
+		"success":    true,
+		"message":    "Excel file generated successfully with streaming",
+		"filename":   resultFilename,
+		"total_rows": req.TotalData,
+		"duration":   elapsed.String(),
+	})
+}
+
+// ExportCustomerExcelStreamingQuery - Streaming Excel export dengan query parameters
+func (h *Handler) ExportCustomerExcelStreamingQuery(c *fiber.Ctx) error {
+	start := time.Now()
+	var mStart, mEnd runtime.MemStats
+	runtime.ReadMemStats(&mStart)
+	log.Info("Received request for streaming Excel export (GET)")
+
+	// Parse query parameters
+	totalDataStr := c.Query("total_data")
+	if totalDataStr == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "total_data query parameter is required",
+		})
+	}
+
+	totalData, err := strconv.ParseInt(totalDataStr, 10, 32)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid total_data parameter",
+		})
+	}
+
+	// Validate limits
+	if totalData <= 0 || totalData > 5000000 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "total_data must be between 1 and 5,000,000",
+		})
+	}
+
+	// Generate filename
+	filename := c.Query("filename")
+	if filename == "" {
+		filename = fmt.Sprintf("customer_updates_streaming_%s.xlsx", time.Now().Format("20060102_150405"))
+	}
+
+	// Ensure .xlsx extension
+	if len(filename) < 5 || filename[len(filename)-5:] != ".xlsx" {
+		filename += ".xlsx"
+	}
+
+	// Start streaming export
+	resultFilename, err := export.ExportCustomerToExcelWithStreaming(h.customerRepo, int32(totalData), filename)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": fmt.Sprintf("Failed to generate Excel file: %v", err),
+		})
+	}
+
+	runtime.ReadMemStats(&mEnd)
+	elapsed := time.Since(start)
+	log.Infof("Memory Usage: Alloc = %.2f MB, TotalAlloc = %.2f MB, Sys = %.2f MB, NumGC = %v",
+		float64(mEnd.Alloc-mStart.Alloc)/1024/1024,
+		float64(mEnd.TotalAlloc-mStart.TotalAlloc)/1024/1024,
+		float64(mEnd.Sys-mStart.Sys)/1024/1024,
+		mEnd.NumGC-mStart.NumGC)
+	log.Infof("Execution Time: %v", elapsed)
+
+	return c.JSON(fiber.Map{
+		"success":    true,
+		"message":    "Excel file generated successfully with streaming (query params)",
+		"filename":   resultFilename,
+		"total_rows": int32(totalData),
+		"duration":   elapsed.String(),
+	})
+}
+
+// DownloadCustomerExcelFile - Download file Excel yang sudah dibuat
+func (h *Handler) DownloadCustomerExcelFile(c *fiber.Ctx) error {
+	start := time.Now()
+	var mStart, mEnd runtime.MemStats
+	runtime.ReadMemStats(&mStart)
+	log.Info("Received request to download customer Excel file")
+
+	filename := c.Params("filename")
+	if filename == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "filename parameter is required",
+		})
+	}
+
+	defer func() {
+		runtime.ReadMemStats(&mEnd)
+		elapsed := time.Since(start)
+		log.Infof("Memory Usage: Alloc = %.2f MB, TotalAlloc = %.2f MB, Sys = %.2f MB, NumGC = %v",
+			float64(mEnd.Alloc-mStart.Alloc)/1024/1024,
+			float64(mEnd.TotalAlloc-mStart.TotalAlloc)/1024/1024,
+			float64(mEnd.Sys-mStart.Sys)/1024/1024,
+			mEnd.NumGC-mStart.NumGC)
+		log.Infof("Download Execution Time: %v", elapsed)
+
+		// Optionally remove file after download (uncomment if desired)
+		// err := os.Remove("./" + filename)
+		// if err != nil {
+		//     log.Errorf("Failed to remove file %s: %v", filename, err)
+		// } else {
+		//     log.Infof("Successfully removed file %s", filename)
+		// }
+	}()
+
+	// Set headers for Excel file download
+	c.Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+
+	return c.SendFile("./" + filename)
 }

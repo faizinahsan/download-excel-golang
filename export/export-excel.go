@@ -2,6 +2,7 @@ package export
 
 import (
 	"download-excel-project/constants"
+	"download-excel-project/repository"
 	"fmt"
 	"github.com/gofiber/fiber/v2/log"
 	"time"
@@ -451,4 +452,165 @@ func ExportAuditTrailToExcel(rows [][]interface{}, totalData int32) (string, err
 	}
 	return fileName, nil
 
+}
+
+// ExportCustomerToExcelWithStreaming - Export customer data to Excel using streaming for memory efficiency
+func ExportCustomerToExcelWithStreaming(repo repository.CustomerRepo, totalData int32, filename string) (string, error) {
+	// Create Excel file
+	f := excelize.NewFile()
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Errorf("Error closing Excel file: %v", err)
+		}
+	}()
+
+	sheet := "Customer Updates"
+	if err := f.SetSheetName("Sheet1", sheet); err != nil {
+		log.Errorf("Error setting sheet name: %v", err)
+		return "", err
+	}
+
+	// Create stream writer for better performance
+	sw, err := f.NewStreamWriter(sheet)
+	if err != nil {
+		log.Errorf("Error creating stream writer: %v", err)
+		return "", err
+	}
+
+	// Set up styles
+	headerStyle, err := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{
+			Bold:  true,
+			Color: "FFFFFF",
+		},
+		Fill: excelize.Fill{
+			Type:    "pattern",
+			Color:   []string{"366092"},
+			Pattern: 1,
+		},
+		Alignment: &excelize.Alignment{
+			Horizontal: "center",
+			Vertical:   "center",
+		},
+		Border: []excelize.Border{
+			{Type: "left", Color: "000000", Style: 1},
+			{Type: "top", Color: "000000", Style: 1},
+			{Type: "bottom", Color: "000000", Style: 1},
+			{Type: "right", Color: "000000", Style: 1},
+		},
+	})
+	if err != nil {
+		log.Errorf("Error creating header style: %v", err)
+		return "", err
+	}
+
+	// Write header row
+	if err := sw.SetRow("A1", []interface{}{
+		excelize.Cell{StyleID: headerStyle, Value: "Created Date"},
+		excelize.Cell{StyleID: headerStyle, Value: "Customer Name"},
+		excelize.Cell{StyleID: headerStyle, Value: "Customer Email"},
+		excelize.Cell{StyleID: headerStyle, Value: "Reference Number"},
+		excelize.Cell{StyleID: headerStyle, Value: "Changes"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old Phone"},
+		excelize.Cell{StyleID: headerStyle, Value: "New Phone"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old Email"},
+		excelize.Cell{StyleID: headerStyle, Value: "New Email"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old Occupation"},
+		excelize.Cell{StyleID: headerStyle, Value: "New Occupation"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old Job"},
+		excelize.Cell{StyleID: headerStyle, Value: "New Job"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old Company"},
+		excelize.Cell{StyleID: headerStyle, Value: "New Company"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old Company Address"},
+		excelize.Cell{StyleID: headerStyle, Value: "New Company Address"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old Company Type"},
+		excelize.Cell{StyleID: headerStyle, Value: "New Company Type"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old Income"},
+		excelize.Cell{StyleID: headerStyle, Value: "New Income"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old Emergency Phone"},
+		excelize.Cell{StyleID: headerStyle, Value: "New Emergency Phone"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old Emergency Contact"},
+		excelize.Cell{StyleID: headerStyle, Value: "New Emergency Contact"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old Address"},
+		excelize.Cell{StyleID: headerStyle, Value: "New Address"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old Kecamatan"},
+		excelize.Cell{StyleID: headerStyle, Value: "New Kecamatan"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old Kelurahan"},
+		excelize.Cell{StyleID: headerStyle, Value: "New Kelurahan"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old RT"},
+		excelize.Cell{StyleID: headerStyle, Value: "New RT"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old RW"},
+		excelize.Cell{StyleID: headerStyle, Value: "New RW"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old City"},
+		excelize.Cell{StyleID: headerStyle, Value: "New City"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old Province"},
+		excelize.Cell{StyleID: headerStyle, Value: "New Province"},
+		excelize.Cell{StyleID: headerStyle, Value: "Old Postal Code"},
+		excelize.Cell{StyleID: headerStyle, Value: "New Postal Code"},
+	}, excelize.RowOpts{Height: 25}); err != nil {
+		log.Errorf("Error writing header row: %v", err)
+		return "", err
+	}
+
+	// Get data stream from repository
+	dataChan, errChan := repo.GenerateUpdateDataWithCursor(totalData)
+
+	var rowNum = 2 // Start from row 2 (row 1 is header)
+	var processedCount = 0
+
+	fmt.Printf("Starting Excel export with streaming for %d records...\n", totalData)
+
+	// Process streaming data
+	for {
+		select {
+		case row, ok := <-dataChan:
+			if !ok {
+				// Channel closed, processing completed
+				if err := sw.Flush(); err != nil {
+					log.Errorf("Error flushing stream writer: %v", err)
+					return "", err
+				}
+
+				// Save file
+				if err := f.SaveAs(filename); err != nil {
+					log.Errorf("Error saving Excel file: %v", err)
+					return "", err
+				}
+
+				fmt.Printf("Excel export completed: %d records written to %s\n", processedCount, filename)
+				return filename, nil
+
+			}
+
+			// Write row to Excel
+			cell, err := excelize.CoordinatesToCellName(1, rowNum)
+			if err != nil {
+				log.Errorf("Error getting cell coordinate: %v", err)
+				return "", err
+			}
+
+			if err := sw.SetRow(cell, row); err != nil {
+				log.Errorf("Error writing row %d: %v", rowNum, err)
+				return "", err
+			}
+
+			rowNum++
+			processedCount++
+
+			// Progress logging
+			if processedCount%10000 == 0 {
+				fmt.Printf("Written %d rows to Excel...\n", processedCount)
+			}
+
+		case err := <-errChan:
+			if err != nil {
+				log.Errorf("Error during streaming: %v", err)
+				return "", fmt.Errorf("error during streaming: %v", err)
+			}
+
+		case <-time.After(30 * time.Minute): // Timeout after 30 minutes
+			log.Errorf("Excel export timed out after 30 minutes")
+			return "", fmt.Errorf("excel export timed out")
+		}
+	}
 }
